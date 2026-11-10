@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.Data;
 
 @Entity
+@Table(name = "risk_assessment")
 @Data
 public class RiskAssessment {
 
@@ -11,7 +12,7 @@ public class RiskAssessment {
     @Column(name = "assessment_id")
     public int ass_ID;
 
-    @Column(name = "asteroid_id")
+    @Column(name = "asteroid_id", length = 20, nullable = false)
     public String aID;
 
     @Column(name = "impact_probability")
@@ -20,7 +21,7 @@ public class RiskAssessment {
     @Column(name = "kinetic_energy_mt")
     public double kineticEnergy;
 
-    @Column(name = "estimated_damage")
+    @Column(name = "estimated_damage", length = 50, nullable = false)
     public String damage;
 
     @Column(name = "risk_score")
@@ -29,9 +30,9 @@ public class RiskAssessment {
     @Column(name = "requires_deflection")
     private boolean defReq;
 
-    @Column(name = "raw_response")
+    @Column(name = "raw_response", columnDefinition = "TEXT")
     private String response;
 
-    @Column(name = "created_at")
+    @Column(name = "created_at", length = 255)
     private String cDate;
 }

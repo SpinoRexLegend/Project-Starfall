@@ -3,14 +3,16 @@ package com.starfall.DatabaseHandling;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import lombok.Data;
 
 @Entity
+@Table(name = "simulation_run")
 @Data
 public class SimulationRun {
 
     @Id
-    @Column(name = "Simulation_Id")
+    @Column(name = "Simulation_ID", length = 36)
     public String s_ID;
 
     @Column(name = "Impact_angle_deg")
@@ -28,6 +30,6 @@ public class SimulationRun {
     @Column(name = "Success")
     public boolean success;
 
-    @Column(name = "Simulated_at")
+    @Column(name = "Simulated_at", length = 255)
     private String sDate;
 }

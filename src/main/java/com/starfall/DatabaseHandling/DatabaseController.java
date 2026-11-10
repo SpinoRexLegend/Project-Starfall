@@ -5,6 +5,7 @@ import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.Transaction;
 import org.hibernate.cfg.Configuration;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.List;
 import java.util.HashMap;
@@ -20,95 +21,45 @@ public class DatabaseController {
 
     private final SessionFactory sf;
 
-    public DatabaseController() {
-        this.sf = new Configuration()
+    public DatabaseController(
+            @Value("${database.url}") String databaseUrl,
+            @Value("${database.username}") String databaseUsername,
+            @Value("${database.password}") String databasePassword,
+            @Value("${database.schema-action}") String schemaAction,
+            @Value("${database.show-sql}") boolean showSql,
+            @Value("${database.pool.maximum-size}") int maximumPoolSize,
+            @Value("${database.pool.minimum-idle}") int minimumIdle,
+            @Value("${database.pool.connection-timeout-ms}") long connectionTimeout,
+            @Value("${database.pool.idle-timeout-ms}") long idleTimeout,
+            @Value("${database.pool.max-lifetime-ms}") long maxLifetime) {
+        Configuration configuration = new Configuration()
                 .addAnnotatedClass(com.starfall.DatabaseHandling.Asteroid.class)
                 .addAnnotatedClass(com.starfall.DatabaseHandling.SimulationRun.class)
-                .addAnnotatedClass(com.starfall.DatabaseHandling.FinalDecision.class)
                 .addAnnotatedClass(com.starfall.DatabaseHandling.QuantumOptimise.class)
                 .addAnnotatedClass(com.starfall.DatabaseHandling.RiskAssessment.class)
-                .addAnnotatedClass(com.starfall.DatabaseHandling.DefStrat.class)
-                .configure()
-                .buildSessionFactory();
+                .configure();
+
+        configuration.setProperty("hibernate.connection.url", databaseUrl);
+        configuration.setProperty("hibernate.connection.username", databaseUsername);
+        configuration.setProperty("hibernate.connection.password", databasePassword);
+        configuration.setProperty("hibernate.hbm2ddl.auto", schemaAction);
+        configuration.setProperty("hibernate.show_sql", Boolean.toString(showSql));
+        configuration.setProperty(
+                "hibernate.connection.provider_class",
+                "org.hibernate.hikaricp.internal.HikariCPConnectionProvider");
+        configuration.setProperty("hibernate.hikari.maximumPoolSize", Integer.toString(maximumPoolSize));
+        configuration.setProperty("hibernate.hikari.minimumIdle", Integer.toString(minimumIdle));
+        configuration.setProperty("hibernate.hikari.connectionTimeout", Long.toString(connectionTimeout));
+        configuration.setProperty("hibernate.hikari.idleTimeout", Long.toString(idleTimeout));
+        configuration.setProperty("hibernate.hikari.maxLifetime", Long.toString(maxLifetime));
+
+        this.sf = configuration.buildSessionFactory();
     }
 
     public Asteroid getAsteroid(String a_ID) {
         try (Session session = sf.openSession()) {
             return session.find(Asteroid.class, a_ID);
         }
-    }
-
-    public void setSimulationRun(List<String[]> simulationRun) {
-        try (Session session = sf.openSession()) {
-            Transaction tx = session.beginTransaction();
-            for (String[] a : simulationRun) {
-                SimulationRun simulation = new SimulationRun();
-                simulation.setS_ID(a[0]);
-                simulation.setAngleOI(Double.parseDouble(a[1]));
-                simulation.setToe(Double.parseDouble(a[2]));
-                simulation.setDistanceMissed(Double.parseDouble(a[3]));
-                simulation.setFuel(Double.parseDouble(a[4]));
-                simulation.setSuccess(Boolean.parseBoolean(a[5]));
-                simulation.setSDate(a[6]);
-                session.persist(simulation);
-            }
-            tx.commit();
-        }
-    }
-
-    public void setRiskAssessment(List<String[]> risks) {
-        try (Session session = sf.openSession()) {
-            Transaction tx = session.beginTransaction();
-            for (String[] a : risks) {
-                RiskAssessment risk = new RiskAssessment();
-                risk.setAss_ID(Integer.parseInt(a[0]));
-                risk.setAID(a[1]);
-                risk.setIp(Double.parseDouble(a[2]));
-                risk.setKineticEnergy(Double.parseDouble(a[3]));
-                risk.setDamage(a[4]);
-                risk.setRiskScore(Double.parseDouble(a[5]));
-                risk.setDefReq(Boolean.parseBoolean(a[6]));
-                risk.setResponse(a[7]);
-                risk.setCDate(a[8]);
-                session.persist(risk);
-            }
-            tx.commit();
-        }
-    }
-
-    public void setQuantumOptimise(List<String[]> optimers) {
-        try (Session session = sf.openSession()) {
-            Transaction tx = session.beginTransaction();
-            for (String[] a : optimers) {
-                QuantumOptimise quantumOptimise = new QuantumOptimise();
-                quantumOptimise.setAss_ID(a[0]);
-                quantumOptimise.setQubits(Integer.parseInt(a[1]));
-                quantumOptimise.setIteration(Integer.parseInt(a[2]));
-                quantumOptimise.setOpProb(Double.parseDouble(a[3]));
-                quantumOptimise.setODate(a[4]);
-                session.persist(quantumOptimise);
-            }
-            tx.commit();
-        }
-    }
-
-    public void setFinalDecision(String[] finalDec) {
-        try (Session session = sf.openSession()) {
-            Transaction tx = session.beginTransaction();
-            FinalDecision finalDecision = new FinalDecision();
-            finalDecision.setDes_ID(finalDec[0]);
-            finalDecision.setStratID(finalDec[1]);
-            finalDecision.setImpactProb(Double.parseDouble(finalDec[2]));
-            finalDecision.setEDmg(finalDec[3]);
-            finalDecision.setRScore(Double.parseDouble(finalDec[4]));
-            finalDecision.setAAt(finalDec[5]);
-            session.persist(finalDecision);
-            tx.commit();
-        }
-    }
-
-    public void setDefStrat() {
-        // Tedious work, will do it later
     }
 
     public void saveSimulationFromResult(List<HashMap<String, Object>> mlDataList) {
@@ -143,7 +94,8 @@ public class DatabaseController {
                 }
 
                 if (mlData.containsKey("Distance from which it will pass if force is applied at that angle")) {
-                    simulation.setDistanceMissed(Double.parseDouble(String.valueOf(mlData.get("Distance from which it will pass if force is applied at that angle"))));
+                    simulation.setDistanceMissed(Double.parseDouble(String.valueOf(mlData.get("Distance from which it " +
+                            "will pass if force is applied at that angle"))));
                 } else if (mlData.containsKey("Missed_distance_km")) {
                     simulation.setDistanceMissed(Double.parseDouble(String.valueOf(mlData.get("Missed_distance_km"))));
                 } else if (mlData.containsKey("distanceMissed")) {
@@ -248,6 +200,10 @@ public class DatabaseController {
                     quantum.setODate(String.valueOf(quantumData.get("Optimised_at")));
                 } else {
                     quantum.setODate(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+                }
+
+                if (quantumData.containsKey("Sim_ID")) {
+                    quantum.setSimID(String.valueOf(quantumData.get("Sim_ID")));
                 }
 
                 session.persist(quantum);

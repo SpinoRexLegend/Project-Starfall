@@ -24,6 +24,9 @@ public class QuantumOptimise {
     @Column(name = "Optimal_probability")
     public double opProb;
 
-    @Column(name = "Optimised_at")
+    @Column(name = "Optimised_at", length = 255)
     public String oDate;
+
+    @Column(name = "Simulation_ID", length = 36, nullable = false)
+    public String simID;
 }

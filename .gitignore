@@ -36,3 +36,14 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### Python ###
+__pycache__/
+*.py[cod]
+.env
+
+### Local database rollback dumps ###
+database-backups/
+
+### Local runtime logs ###
+runtime-logs/

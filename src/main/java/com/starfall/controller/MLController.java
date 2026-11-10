@@ -45,10 +45,12 @@ public class MLController {
                 bestDist);
     }
 
-    public HashMap<String, Object> processQuantumOptimization(HashMap<String, Object> riskAssessment, List<String> simulationIds) {
-        double riskScore = riskAssessment != null && riskAssessment.containsKey("riskScore") ? Double.parseDouble(String.valueOf(riskAssessment.get("riskScore"))) : 0;
-        boolean requiresDeflection = riskAssessment != null && riskAssessment.containsKey("requiresDeflection") && Boolean.parseBoolean(String.valueOf(riskAssessment.get("requiresDeflection")));
-
-        return mlAnalysisService.callQuantumPython(riskScore, requiresDeflection, simulationIds);
+    public HashMap<String, Object> processQuantumOptimization(
+            Asteroid asteroid,
+            List<HashMap<String, Object>> simulations) {
+        if (simulations == null || simulations.isEmpty()) {
+            throw new IllegalArgumentException("No simulations are available for agent analysis");
+        }
+        return mlAnalysisService.callQuantumPython(asteroid, simulations);
     }
 }

@@ -1,27 +1,76 @@
-from flask import Flask, request, jsonify
-
-app = Flask(__name__)
-
+import os
 import random
 import uuid
 from datetime import datetime
+
+from flask import Flask, jsonify, request
+
 import RiskAssessor
 import QuantumOptimizer
+import AgenticPlanner
+
+app = Flask(__name__)
+
+
+def error_response(code, message, status_code=400):
+    return jsonify({
+        "status": "error",
+        "code": code,
+        "message": message
+    }), status_code
+
+
+def json_body():
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else None
+
+
+def required_number(data, key, minimum=None, maximum=None):
+    value = data.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None, f"{key} must be a number"
+    value = float(value)
+    if minimum is not None and value < minimum:
+        return None, f"{key} must be at least {minimum}"
+    if maximum is not None and value > maximum:
+        return None, f"{key} must be at most {maximum}"
+    return value, None
+
+
+def configured_positive_integer(name, default):
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as exception:
+        raise RuntimeError(f"{name} must be an integer") from exception
+    if value <= 0:
+        raise RuntimeError(f"{name} must be greater than zero")
+    return value
+
+
+@app.get("/health")
+@app.get("/internal/v1/health")
+def health():
+    return jsonify({"status": "UP", "service": "starfall-analysis"}), 200
+
 
 @app.route("/predict", methods=["POST"])
+@app.route("/internal/v1/simulations", methods=["POST"])
 def predict():
-
-    data = request.get_json()
-
-    if not data:
-        return jsonify({"error": "No data received"}), 400
+    data = json_body()
+    if data is None:
+        return error_response("MALFORMED_JSON", "Request body must contain a JSON object")
 
     material = data.get("Material", "Unknown")
-    diameter = data.get("Diameter")
-    velocity = data.get("Velocity")
+    if not isinstance(material, str) or not material.strip():
+        return error_response("VALIDATION_ERROR", "Material must be a non-empty string")
 
-    if diameter is None or velocity is None:
-        return jsonify({"error": "Diameter and Velocity are required"}), 400
+    diameter, error = required_number(data, "Diameter", minimum=0.000001)
+    if error:
+        return error_response("VALIDATION_ERROR", error)
+    velocity, error = required_number(data, "Velocity", minimum=0.000001)
+    if error:
+        return error_response("VALIDATION_ERROR", error)
 
     simulations = []
     base_fuel = (diameter * velocity) / 10.0
@@ -52,20 +101,35 @@ def predict():
 
 
 @app.route("/assess", methods=["POST"])
+@app.route("/internal/v1/risk-assessments", methods=["POST"])
 def assess():
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No data received"}), 400
-        
+    data = json_body()
+    if data is None:
+        return error_response("MALFORMED_JSON", "Request body must contain a JSON object")
+
     asteroid_id = data.get("asteroidID")
-    diameter = data.get("Diameter")
-    velocity = data.get("Velocity")
-    material = data.get("Material")
-    best_fuel = data.get("BestFuel")
-    best_distance = data.get("BestDistance")
-    
+    if not isinstance(asteroid_id, str) or not asteroid_id.strip():
+        return error_response("VALIDATION_ERROR", "asteroidID is required")
+
+    material = data.get("Material", "Unknown")
+    if not isinstance(material, str) or not material.strip():
+        return error_response("VALIDATION_ERROR", "Material must be a non-empty string")
+
+    diameter, error = required_number(data, "Diameter", minimum=0.000001)
+    if error:
+        return error_response("VALIDATION_ERROR", error)
+    velocity, error = required_number(data, "Velocity", minimum=0.000001)
+    if error:
+        return error_response("VALIDATION_ERROR", error)
+    best_fuel, error = required_number(data, "BestFuel", minimum=0)
+    if error:
+        return error_response("VALIDATION_ERROR", error)
+    best_distance, error = required_number(data, "BestDistance", minimum=0)
+    if error:
+        return error_response("VALIDATION_ERROR", error)
+
     result = RiskAssessor.perform_assessment(asteroid_id, diameter, velocity, material, best_fuel, best_distance)
-    
+
     return jsonify({
         "status": "success",
         "output": result
@@ -73,17 +137,48 @@ def assess():
 
 
 @app.route("/quantum", methods=["POST"])
+@app.route("/internal/v1/optimizations", methods=["POST"])
 def quantum():
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No data received"}), 400
-        
-    risk_score = data.get("riskScore", 0.0)
-    requires_deflection = data.get("requiresDeflection", False)
-    simulation_ids = data.get("simulationIDs", [])
-    
-    result = QuantumOptimizer.perform_quantum_optimization(risk_score, requires_deflection, simulation_ids)
-    
+    data = json_body()
+    if data is None:
+        return error_response("MALFORMED_JSON", "Request body must contain a JSON object")
+
+    asteroid = data.get("asteroid")
+    if not isinstance(asteroid, dict) or not asteroid:
+        return error_response(
+            "VALIDATION_ERROR",
+            "asteroid must be a non-empty object"
+        )
+
+    simulations = data.get("simulations")
+    if not isinstance(simulations, list) or not simulations:
+        return error_response(
+            "VALIDATION_ERROR",
+            "simulations must be a non-empty array"
+        )
+
+    seed_value = os.getenv("QUANTUM_SEED")
+    seed = int(seed_value) if seed_value is not None else None
+
+    try:
+        agent_plan = AgenticPlanner.generate_grover_plan(asteroid, simulations)
+        result = QuantumOptimizer.perform_quantum_optimization(
+            agent_plan["candidates"],
+            shots=configured_positive_integer("QUANTUM_SHOTS", 4096),
+            seed=seed
+        )
+        result["agent"] = {
+            "model": agent_plan["model"],
+            "summary": agent_plan["summary"],
+            "candidateAssessments": agent_plan["candidates"]
+        }
+    except AgenticPlanner.AgentInputError as exception:
+        return error_response("VALIDATION_ERROR", str(exception), 400)
+    except AgenticPlanner.AgentPlanningError as exception:
+        return error_response("AI_AGENT_ERROR", str(exception), 502)
+    except (QuantumOptimizer.QuantumOptimizationError, RuntimeError, ValueError) as exception:
+        return error_response("QUANTUM_EXECUTION_ERROR", str(exception), 422)
+
     return jsonify({
         "status": "success",
         "output": result
@@ -91,4 +186,8 @@ def quantum():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(
+        host=os.getenv("HOST", "127.0.0.1"),
+        port=int(os.getenv("PORT", "5000")),
+        debug=os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    )

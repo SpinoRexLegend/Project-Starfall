@@ -1,5 +1,6 @@
 package com.starfall.ProcessBuilder;
 
+import com.starfall.DatabaseHandling.Asteroid;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -29,11 +30,21 @@ public class PythonProcessBuilder {
         return map;
     }
 
-    public HashMap<String, Object> buildQuantumRequest(double riskScore, boolean requiresDeflection, List<String> simulationIds) {
+    public HashMap<String, Object> buildQuantumRequest(
+            Asteroid asteroid,
+            List<HashMap<String, Object>> simulations) {
+        HashMap<String, Object> asteroidDetails = new HashMap<>();
+        asteroidDetails.put("asteroidID", asteroid.getAsteroid_Id());
+        asteroidDetails.put("name", asteroid.getName());
+        asteroidDetails.put("diameterKm", asteroid.getDiameter());
+        asteroidDetails.put("velocityKmps", asteroid.getVelocity());
+        asteroidDetails.put("composition", asteroid.getComposition());
+        asteroidDetails.put("detectionSource", asteroid.getDSource());
+        asteroidDetails.put("detectionDate", asteroid.getDDate());
+
         HashMap<String, Object> map = new HashMap<>();
-        map.put("riskScore", riskScore);
-        map.put("requiresDeflection", requiresDeflection);
-        map.put("simulationIDs", simulationIds);
+        map.put("asteroid", asteroidDetails);
+        map.put("simulations", simulations);
         return map;
     }
 }

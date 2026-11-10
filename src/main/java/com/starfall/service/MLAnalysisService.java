@@ -1,6 +1,8 @@
 package com.starfall.service;
 
 import com.starfall.ProcessBuilder.PythonProcessBuilder;
+import com.starfall.DatabaseHandling.Asteroid;
+import com.starfall.exception.PythonServiceException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
@@ -9,7 +11,6 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.HashMap;
 import java.util.List;
-import java.util.ArrayList;
 
 @Service
 public class MLAnalysisService {
@@ -17,12 +18,15 @@ public class MLAnalysisService {
     private final RestTemplate restTemplate;
     private final PythonProcessBuilder processBuilder;
 
-    @Value("${python.service.url:http://localhost:5000}")
-    private String pythonBaseUrl;
+    private final String pythonBaseUrl;
 
-    public MLAnalysisService(RestTemplate restTemplate, PythonProcessBuilder processBuilder) {
+    public MLAnalysisService(
+            RestTemplate restTemplate,
+            PythonProcessBuilder processBuilder,
+            @Value("${python.service.url}") String pythonBaseUrl) {
         this.restTemplate = restTemplate;
         this.processBuilder = processBuilder;
+        this.pythonBaseUrl = pythonBaseUrl.replaceAll("/+$", "");
     }
 
     public List<HashMap<String, Object>> callPython(String material, double dia, double vel) {
@@ -38,28 +42,22 @@ public class MLAnalysisService {
         try {
             ResponseEntity<HashMap<String, Object>> response =
                     restTemplate.exchange(
-                            pythonBaseUrl + "/predict",
+                            pythonBaseUrl + "/internal/v1/simulations",
                             HttpMethod.POST,
                             requestEntity,
                             new ParameterizedTypeReference<HashMap<String, Object>>() {}
                     );
 
             HashMap<String, Object> body = response.getBody();
-            if (body != null && body.containsKey("output")) {
-                return (List<HashMap<String, Object>>) body.get("output");
+            if (body != null && "success".equals(body.get("status")) && body.get("output") instanceof List<?> output) {
+                return output.stream()
+                        .filter(HashMap.class::isInstance)
+                        .map(item -> (HashMap<String, Object>) item)
+                        .toList();
             }
-            return new ArrayList<>();
-
+            throw new PythonServiceException("simulations", "Python simulation service returned an invalid response");
         } catch (Exception e) {
-
-            HashMap<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("status", "error");
-            errorResponse.put("message", "Python service unavailable");
-            errorResponse.put("details", e.getMessage());
-
-            List<HashMap<String, Object>> errList = new ArrayList<>();
-            errList.add(errorResponse);
-            return errList;
+            throw wrap("simulations", e);
         }
     }
 
@@ -75,29 +73,26 @@ public class MLAnalysisService {
         try {
             ResponseEntity<HashMap<String, Object>> response =
                     restTemplate.exchange(
-                            pythonBaseUrl + "/assess",
+                            pythonBaseUrl + "/internal/v1/risk-assessments",
                             HttpMethod.POST,
                             requestEntity,
                             new ParameterizedTypeReference<HashMap<String, Object>>() {}
                     );
 
             HashMap<String, Object> body = response.getBody();
-            if (body != null && body.containsKey("output")) {
+            if (body != null && "success".equals(body.get("status")) && body.get("output") instanceof HashMap) {
                 return (HashMap<String, Object>) body.get("output");
             }
-            return new HashMap<>();
-
+            throw new PythonServiceException("risk-assessments", "Python risk service returned an invalid response");
         } catch (Exception e) {
-            HashMap<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("status", "error");
-            errorResponse.put("message", "Python service unavailable for risk assessment");
-            errorResponse.put("details", e.getMessage());
-            return errorResponse;
+            throw wrap("risk-assessments", e);
         }
     }
 
-    public HashMap<String, Object> callQuantumPython(double riskScore, boolean requiresDeflection, List<String> simulationIds) {
-        HashMap<String, Object> requestBody = processBuilder.buildQuantumRequest(riskScore, requiresDeflection, simulationIds);
+    public HashMap<String, Object> callQuantumPython(
+            Asteroid asteroid,
+            List<HashMap<String, Object>> simulations) {
+        HashMap<String, Object> requestBody = processBuilder.buildQuantumRequest(asteroid, simulations);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -108,24 +103,26 @@ public class MLAnalysisService {
         try {
             ResponseEntity<HashMap<String, Object>> response =
                     restTemplate.exchange(
-                            pythonBaseUrl + "/quantum",
+                            pythonBaseUrl + "/internal/v1/optimizations",
                             HttpMethod.POST,
                             requestEntity,
                             new ParameterizedTypeReference<HashMap<String, Object>>() {}
                     );
 
             HashMap<String, Object> body = response.getBody();
-            if (body != null && body.containsKey("output")) {
+            if (body != null && "success".equals(body.get("status")) && body.get("output") instanceof HashMap) {
                 return (HashMap<String, Object>) body.get("output");
             }
-            return new HashMap<>();
-
+            throw new PythonServiceException("optimizations", "Python optimization service returned an invalid response");
         } catch (Exception e) {
-            HashMap<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("status", "error");
-            errorResponse.put("message", "Python service unavailable for quantum optimisation");
-            errorResponse.put("details", e.getMessage());
-            return errorResponse;
+            throw wrap("optimizations", e);
         }
+    }
+
+    private PythonServiceException wrap(String operation, Exception exception) {
+        if (exception instanceof PythonServiceException pythonServiceException) {
+            return pythonServiceException;
+        }
+        return new PythonServiceException(operation, "Python service request failed", exception);
     }
 }

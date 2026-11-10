@@ -3,13 +3,13 @@ package com.starfall.DatabaseHandling;
 import jakarta.persistence.*;
 import lombok.Data;
 
-import java.util.List;
-
 @Entity
+@Table(name = "asteroid")
 @Data
 public class Asteroid {
 
     @Id
+    @Column(name = "Asteroid_ID", length = 20)
     private String asteroid_Id;
 
     private String name;
