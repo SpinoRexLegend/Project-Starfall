@@ -23,7 +23,8 @@ class MLAnalysisServiceTest {
         MLAnalysisService service = new MLAnalysisService(
                 new FailingRestTemplate(),
                 new PythonProcessBuilder(),
-                "http://python");
+                "http://python",
+                "http://agent");
 
         assertThrows(
                 PythonServiceException.class,
@@ -31,11 +32,12 @@ class MLAnalysisServiceTest {
     }
 
     @Test
-    void doesNotHideQuantumServiceFailure() {
+    void doesNotHideAgentServiceFailure() {
         MLAnalysisService service = new MLAnalysisService(
                 new FailingRestTemplate(),
                 new PythonProcessBuilder(),
-                "http://python");
+                "http://python",
+                "http://agent");
 
         assertThrows(
                 PythonServiceException.class,

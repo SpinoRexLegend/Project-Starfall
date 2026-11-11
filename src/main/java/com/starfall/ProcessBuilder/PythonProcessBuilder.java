@@ -30,7 +30,7 @@ public class PythonProcessBuilder {
         return map;
     }
 
-    public HashMap<String, Object> buildQuantumRequest(
+    public HashMap<String, Object> buildAgentRequest(
             Asteroid asteroid,
             List<HashMap<String, Object>> simulations) {
         HashMap<String, Object> asteroidDetails = new HashMap<>();
@@ -45,6 +45,28 @@ public class PythonProcessBuilder {
         HashMap<String, Object> map = new HashMap<>();
         map.put("asteroid", asteroidDetails);
         map.put("simulations", simulations);
+        return map;
+    }
+
+    public HashMap<String, Object> buildQuantumRequest(
+            Asteroid asteroid,
+            List<HashMap<String, Object>> simulations) {
+        return buildAgentRequest(asteroid, simulations);
+    }
+
+    public HashMap<String, Object> buildQuantumOptimizationRequest(
+            HashMap<String, Object> agentPlan) {
+        Object candidates = agentPlan.get("candidates");
+
+        HashMap<String, Object> agentMetadata = new HashMap<>();
+        agentMetadata.put("model", agentPlan.get("model"));
+        agentMetadata.put("mode", agentPlan.get("mode"));
+        agentMetadata.put("summary", agentPlan.get("summary"));
+        agentMetadata.put("candidateAssessments", candidates);
+
+        HashMap<String, Object> map = new HashMap<>();
+        map.put("candidates", candidates);
+        map.put("agent", agentMetadata);
         return map;
     }
 }

@@ -91,6 +91,68 @@ class StarfallApiTest(unittest.TestCase):
         self.assertEqual("test-model", body["output"]["agent"]["model"])
         generate_plan.assert_called_once_with(asteroid, simulations)
 
+    @patch("App.AgenticPlanner.generate_grover_plan")
+    def test_optimization_accepts_candidates_from_separate_agent_service(self, generate_plan):
+        candidates = [
+            {"simulationId": "SIM-A", "score": 10.0, "eligible": True, "rationale": "Lower"},
+            {"simulationId": "SIM-B", "score": 80.0, "eligible": True, "rationale": "Best"}
+        ]
+        agent = {
+            "model": "starfall-local-safety-agent",
+            "mode": "fallback",
+            "summary": "Validated separately.",
+            "candidateAssessments": candidates
+        }
+
+        response = self.client.post("/internal/v1/optimizations", json={
+            "candidates": candidates,
+            "agent": agent
+        })
+
+        body = response.get_json()
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("SIM-B", body["output"]["selectedSimulationID"])
+        self.assertEqual(agent, body["output"]["agent"])
+        generate_plan.assert_not_called()
+
+    @patch("App.QuantumOptimizer.perform_quantum_optimization")
+    @patch("App.AgenticPlanner.generate_fallback_plan")
+    @patch("App.AgenticPlanner.generate_grover_plan")
+    def test_optimization_uses_fallback_when_agent_is_unavailable(
+            self, generate_plan, generate_fallback, optimize):
+        asteroid = {"asteroidID": "A-1"}
+        simulations = [{"SimulationID": "SIM-A", "Chances of success": 1}]
+
+        generate_plan.side_effect = __import__("AgenticPlanner").AgentPlanningError(
+            "provider unavailable"
+        )
+        generate_fallback.return_value = {
+            "model": "starfall-local-safety-agent",
+            "mode": "fallback",
+            "summary": "Local safety policy used.",
+            "candidates": [{
+                "simulationId": "SIM-A",
+                "score": 50.0,
+                "eligible": True,
+                "rationale": "Eligible"
+            }]
+        }
+        optimize.return_value = {
+            "largestScore": 50.0,
+            "selectedSimulationID": "SIM-A"
+        }
+
+        with patch.dict("os.environ", {}, clear=True):
+            response = self.client.post("/internal/v1/optimizations", json={
+                "asteroid": asteroid,
+                "simulations": simulations
+            })
+
+        body = response.get_json()
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("fallback", body["output"]["agent"]["mode"])
+        generate_fallback.assert_called_once_with(asteroid, simulations)
+
 
 if __name__ == "__main__":
     unittest.main()

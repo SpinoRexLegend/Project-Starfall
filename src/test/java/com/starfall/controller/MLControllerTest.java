@@ -53,7 +53,7 @@ class MLControllerTest {
         private List<HashMap<String, Object>> simulations;
 
         private StubMLAnalysisService() {
-            super(null, null, "http://python");
+            super(null, null, "http://python", "http://agent");
         }
 
         @Override

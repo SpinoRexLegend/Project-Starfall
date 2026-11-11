@@ -6,6 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const requestStatus = document.getElementById('request-status');
     const resultsSection = document.getElementById('results');
 
+    initDeferredVideos();
+
     const configuredApiBaseUrl = window.STARFALL_CONFIG?.apiBaseUrl;
     const isLocalStaticPreview = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
         && window.location.port !== '8080';
@@ -76,7 +78,11 @@ document.addEventListener('DOMContentLoaded', () => {
         setText('metric-risk-label', stringValue(risk.estimatedDamage) || 'Damage class unavailable');
 
         const kineticEnergy = numericValue(risk.kineticEnergyMT);
-        setText('metric-energy', kineticEnergy === null ? '—' : formatNumber(kineticEnergy, 2));
+        const materialDensity = numericValue(risk.materialDensityKgM3);
+        setText('metric-energy', formatEnergyMt(kineticEnergy));
+        setText('metric-energy-label', materialDensity === null
+            ? '½mv² · Megatons TNT'
+            : `½mv² · ${formatNumber(materialDensity, 0)} kg/m³`);
         setText('metric-selection', selectedId ? compactId(selectedId, 13) : '—');
 
         const qubits = numericValue(quantum.qubitsUsed);
@@ -84,7 +90,11 @@ document.addEventListener('DOMContentLoaded', () => {
         setText('metric-qubits', qubits === null ? '—' : `${formatNumber(qubits, 0)} q`);
         setText('metric-iterations', `${iterations === null ? '—' : formatNumber(iterations, 0)} Grover iterations`);
 
-        setText('agent-model', stringValue(agent.model) || 'Validated scoring layer');
+        const agentMode = stringValue(agent.mode);
+        const agentModel = agentMode === 'fallback'
+            ? 'Starfall local safety agent'
+            : (stringValue(agent.model) || 'Validated scoring layer');
+        setText('agent-model', agentModel);
         setText('agent-summary', stringValue(agent.summary) || 'Candidate simulations were validated and submitted to Grover amplitude amplification.');
 
         const selectedAssessment = Array.isArray(agent.candidateAssessments)
@@ -108,7 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const succeeded = simulationSucceeded(optimal);
 
         const probabilityText = impactProbability === null ? 'an undetermined impact probability' : `a ${(impactProbability * 100).toFixed(1)}% impact probability`;
-        const energyText = energy === null ? `${damage.toLowerCase()} projected damage` : `${formatNumber(energy, 2)} MT of estimated kinetic energy and ${damage.toLowerCase()} projected damage`;
+        const energyText = energy === null ? `${damage.toLowerCase()} projected damage` : `${formatEnergyMt(energy)} MT of estimated kinetic energy and ${damage.toLowerCase()} projected damage`;
         const strategyText = selectedId ? `Simulation ${compactId(selectedId, 13)} was amplified as the strongest eligible intervention.` : 'The highest eligible intervention was selected.';
         const outcomeText = succeeded ? 'The archived simulation indicates a successful deflection.' : 'The selected simulation requires further review before execution.';
 
@@ -197,6 +207,64 @@ document.addEventListener('DOMContentLoaded', () => {
     function objectOrEmpty(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
     function compactId(value, length) { const text = stringValue(value); if (!text || text.length <= length) return text; return `${text.slice(0, length - 1)}…`; }
     function formatNumber(value, fractionDigits) { return new Intl.NumberFormat('en-US', { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits }).format(value); }
+    function formatEnergyMt(value) {
+        if (value === null) return '—';
+        if (value === 0) return '0';
+        return Math.abs(value) < .01 ? value.toExponential(2) : formatNumber(value, 2);
+    }
     function clamp(value, minimum, maximum) { return Math.min(maximum, Math.max(minimum, value)); }
     function setText(id, value) { const element = document.getElementById(id); if (element) element.textContent = String(value); }
+
+    function initDeferredVideos() {
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const saveData = Boolean(navigator.connection?.saveData);
+        const canAnimateHero = window.matchMedia('(min-width: 900px)').matches && !reduceMotion && !saveData;
+        const canAnimateProtocol = window.matchMedia('(min-width: 761px)').matches && !reduceMotion && !saveData;
+        const heroVideo = document.querySelector('[data-deferred-video="hero"]');
+        const viewportVideos = [...document.querySelectorAll('[data-deferred-video="viewport"]')];
+
+        const hydrateVideo = (video) => {
+            if (!video || video.dataset.hydrated === 'true') return;
+            const source = video.querySelector('source[data-src]');
+            if (!source) return;
+            source.src = source.dataset.src;
+            source.removeAttribute('data-src');
+            video.dataset.hydrated = 'true';
+            video.addEventListener('canplay', () => video.classList.add('is-ready'), { once: true });
+            video.load();
+        };
+
+        const playVideo = (video) => {
+            hydrateVideo(video);
+            video.dataset.inView = 'true';
+            if (!document.hidden) video.play().catch(() => {});
+        };
+
+        if (heroVideo && canAnimateHero) {
+            const startHero = () => playVideo(heroVideo);
+            if ('requestIdleCallback' in window) window.requestIdleCallback(startHero, { timeout: 2500 });
+            else window.setTimeout(startHero, 1200);
+        }
+
+        if (canAnimateProtocol && viewportVideos.length && 'IntersectionObserver' in window) {
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach((entry) => {
+                    const video = entry.target;
+                    if (entry.isIntersecting) playVideo(video);
+                    else {
+                        video.dataset.inView = 'false';
+                        video.pause();
+                    }
+                });
+            }, { rootMargin: '240px 0px', threshold: 0.01 });
+            viewportVideos.forEach((video) => observer.observe(video));
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            document.querySelectorAll('video[data-hydrated="true"]').forEach((video) => {
+                if (document.hidden) video.pause();
+                else if (video.dataset.inView === 'true') video.play().catch(() => {});
+            });
+        });
+    }
 });

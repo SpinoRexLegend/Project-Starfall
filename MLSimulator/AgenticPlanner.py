@@ -80,7 +80,70 @@ def generate_grover_plan(asteroid, simulations):
     plan = _extract_plan(response)
     validated_plan = _validate_plan(plan, simulations)
     validated_plan["model"] = configuration["model"]
+    validated_plan["mode"] = "external-agent"
     return validated_plan
+
+
+def generate_fallback_plan(asteroid, simulations):
+    """Build a deterministic, data-relative plan when the external agent is unavailable."""
+    _validate_input(asteroid, simulations)
+    weights = _fallback_weights()
+    successful = [item for item in simulations if _simulation_succeeded(item)]
+    if not successful:
+        raise AgentPlanningError("No successful simulation is available for optimization")
+
+    metrics = {
+        "distance": _metric_bounds(successful, (
+            "Distance from which it will pass if force is applied at that angle",
+            "MissDistance",
+            "distance"
+        )),
+        "fuel": _metric_bounds(successful, ("Fuel Cost", "FuelCost", "fuel")),
+        "time": _metric_bounds(successful, (
+            "Execution time for hitting the earth",
+            "ExecutionTime",
+            "executionTime"
+        ))
+    }
+
+    candidates = []
+    for simulation in simulations:
+        simulation_id = _simulation_id(simulation)
+        eligible = _simulation_succeeded(simulation)
+        if eligible:
+            distance_score = _normalized_metric(simulation, metrics["distance"], higher_is_better=True)
+            fuel_score = _normalized_metric(simulation, metrics["fuel"], higher_is_better=False)
+            time_score = _normalized_metric(simulation, metrics["time"], higher_is_better=False)
+            score = 100.0 * (
+                weights["distance"] * distance_score
+                + weights["fuel"] * fuel_score
+                + weights["time"] * time_score
+            )
+            rationale = (
+                "Eligible successful simulation; scored against this request's miss distance, "
+                "fuel use, and execution time ranges."
+            )
+        else:
+            score = 0.0
+            rationale = "Excluded because the simulation did not meet the success criterion."
+
+        candidates.append({
+            "simulationId": simulation_id,
+            "score": round(score, 6),
+            "eligible": eligible,
+            "rationale": rationale
+        })
+
+    return {
+        "model": "starfall-local-safety-agent",
+        "mode": "fallback",
+        "summary": (
+            "Starfall evaluated every trajectory against mission success, miss distance, "
+            "fuel demand, and execution time, then prepared the validated candidate set "
+            "for Grover amplification."
+        ),
+        "candidates": candidates
+    }
 
 
 def _configuration():
@@ -124,6 +187,58 @@ def _positive_integer(name, default):
     if value <= 0:
         raise AgentPlanningError(f"{name} must be greater than zero")
     return value
+
+
+def _fallback_weights():
+    weights = {
+        "distance": _non_negative_number("AI_FALLBACK_DISTANCE_WEIGHT", 0.60),
+        "fuel": _non_negative_number("AI_FALLBACK_FUEL_WEIGHT", 0.25),
+        "time": _non_negative_number("AI_FALLBACK_TIME_WEIGHT", 0.15)
+    }
+    total = sum(weights.values())
+    if total <= 0:
+        raise AgentPlanningError("At least one AI fallback weight must be greater than zero")
+    return {name: value / total for name, value in weights.items()}
+
+
+def _non_negative_number(name, default):
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = float(raw_value)
+    except ValueError as exception:
+        raise AgentPlanningError(f"{name} must be a number") from exception
+    if not math.isfinite(value) or value < 0:
+        raise AgentPlanningError(f"{name} must be zero or greater")
+    return value
+
+
+def _metric_bounds(simulations, keys):
+    values = []
+    for simulation in simulations:
+        value = _numeric_value(simulation, keys)
+        if value is not None:
+            values.append(value)
+    if not values:
+        return {"keys": keys, "minimum": None, "maximum": None}
+    return {"keys": keys, "minimum": min(values), "maximum": max(values)}
+
+
+def _normalized_metric(simulation, bounds, higher_is_better):
+    value = _numeric_value(simulation, bounds["keys"])
+    minimum = bounds["minimum"]
+    maximum = bounds["maximum"]
+    if value is None or minimum is None or maximum is None or maximum == minimum:
+        return 0.5
+    normalized = (value - minimum) / (maximum - minimum)
+    return normalized if higher_is_better else 1.0 - normalized
+
+
+def _numeric_value(source, keys):
+    for key in keys:
+        value = source.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+            return float(value)
+    return None
 
 
 def _call_responses_api(configuration, payload):

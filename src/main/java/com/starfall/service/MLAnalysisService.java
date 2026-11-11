@@ -19,14 +19,17 @@ public class MLAnalysisService {
     private final PythonProcessBuilder processBuilder;
 
     private final String pythonBaseUrl;
+    private final String agentBaseUrl;
 
     public MLAnalysisService(
             RestTemplate restTemplate,
             PythonProcessBuilder processBuilder,
-            @Value("${python.service.url}") String pythonBaseUrl) {
+            @Value("${python.service.url}") String pythonBaseUrl,
+            @Value("${agent.service.url}") String agentBaseUrl) {
         this.restTemplate = restTemplate;
         this.processBuilder = processBuilder;
         this.pythonBaseUrl = pythonBaseUrl.replaceAll("/+$", "");
+        this.agentBaseUrl = agentBaseUrl.replaceAll("/+$", "");
     }
 
     public List<HashMap<String, Object>> callPython(String material, double dia, double vel) {
@@ -92,7 +95,9 @@ public class MLAnalysisService {
     public HashMap<String, Object> callQuantumPython(
             Asteroid asteroid,
             List<HashMap<String, Object>> simulations) {
-        HashMap<String, Object> requestBody = processBuilder.buildQuantumRequest(asteroid, simulations);
+        HashMap<String, Object> agentPlan = callAgentPython(asteroid, simulations);
+        HashMap<String, Object> requestBody =
+                processBuilder.buildQuantumOptimizationRequest(agentPlan);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -116,6 +121,41 @@ public class MLAnalysisService {
             throw new PythonServiceException("optimizations", "Python optimization service returned an invalid response");
         } catch (Exception e) {
             throw wrap("optimizations", e);
+        }
+    }
+
+    public HashMap<String, Object> callAgentPython(
+            Asteroid asteroid,
+            List<HashMap<String, Object>> simulations) {
+        HashMap<String, Object> requestBody =
+                processBuilder.buildAgentRequest(asteroid, simulations);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<HashMap<String, Object>> requestEntity =
+                new HttpEntity<>(requestBody, headers);
+
+        try {
+            ResponseEntity<HashMap<String, Object>> response =
+                    restTemplate.exchange(
+                            agentBaseUrl + "/internal/v1/agent-decisions",
+                            HttpMethod.POST,
+                            requestEntity,
+                            new ParameterizedTypeReference<HashMap<String, Object>>() {}
+                    );
+
+            HashMap<String, Object> body = response.getBody();
+            if (body != null
+                    && "success".equals(body.get("status"))
+                    && body.get("output") instanceof HashMap<?, ?> output
+                    && output.get("candidates") instanceof List<?>) {
+                return (HashMap<String, Object>) output;
+            }
+            throw new PythonServiceException(
+                    "agent-decisions",
+                    "Agent service returned an invalid response");
+        } catch (Exception e) {
+            throw wrap("agent-decisions", e);
         }
     }
 

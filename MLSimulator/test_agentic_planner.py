@@ -55,7 +55,29 @@ class AgenticPlannerTest(unittest.TestCase):
         self.assertEqual(self.simulations, sent_context["simulations"])
         self.assertTrue(payload["text"]["format"]["strict"])
         self.assertEqual("test-model", plan["model"])
+        self.assertEqual("external-agent", plan["mode"])
         self.assertEqual(82.0, plan["candidates"][0]["score"])
+
+    def test_fallback_plan_scores_request_data_and_excludes_failed_runs(self):
+        self.simulations[0]["Execution time for hitting the earth"] = 8.0
+        self.simulations.append({
+            "SimulationID": "SIM-C",
+            "Chances of success": 1,
+            "Fuel Cost": 10.0,
+            "Distance from which it will pass if force is applied at that angle": 9000.0,
+            "Execution time for hitting the earth": 4.0
+        })
+
+        with patch.dict("os.environ", {}, clear=True):
+            plan = AgenticPlanner.generate_fallback_plan(self.asteroid, self.simulations)
+
+        candidates = {item["simulationId"]: item for item in plan["candidates"]}
+        self.assertEqual("fallback", plan["mode"])
+        self.assertEqual("starfall-local-safety-agent", plan["model"])
+        self.assertNotIn("unavailable", plan["summary"].lower())
+        self.assertGreater(candidates["SIM-C"]["score"], candidates["SIM-A"]["score"])
+        self.assertFalse(candidates["SIM-B"]["eligible"])
+        self.assertEqual(0.0, candidates["SIM-B"]["score"])
 
     def test_rejects_hallucinated_simulation_id(self):
         response = self._provider_response({

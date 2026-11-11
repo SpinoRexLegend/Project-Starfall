@@ -48,6 +48,15 @@ def configured_positive_integer(name, default):
     return value
 
 
+def configured_boolean(name, default):
+    value = os.getenv(name, str(default)).strip().lower()
+    if value in {"true", "1", "yes", "on"}:
+        return True
+    if value in {"false", "0", "no", "off"}:
+        return False
+    raise RuntimeError(f"{name} must be a boolean")
+
+
 @app.get("/health")
 @app.get("/internal/v1/health")
 def health():
@@ -128,7 +137,17 @@ def assess():
     if error:
         return error_response("VALIDATION_ERROR", error)
 
-    result = RiskAssessor.perform_assessment(asteroid_id, diameter, velocity, material, best_fuel, best_distance)
+    try:
+        result = RiskAssessor.perform_assessment(
+            asteroid_id,
+            diameter,
+            velocity,
+            material,
+            best_fuel,
+            best_distance
+        )
+    except ValueError as exception:
+        return error_response("RISK_CALCULATION_ERROR", str(exception), 422)
 
     return jsonify({
         "status": "success",
@@ -143,35 +162,52 @@ def quantum():
     if data is None:
         return error_response("MALFORMED_JSON", "Request body must contain a JSON object")
 
-    asteroid = data.get("asteroid")
-    if not isinstance(asteroid, dict) or not asteroid:
-        return error_response(
-            "VALIDATION_ERROR",
-            "asteroid must be a non-empty object"
-        )
-
-    simulations = data.get("simulations")
-    if not isinstance(simulations, list) or not simulations:
-        return error_response(
-            "VALIDATION_ERROR",
-            "simulations must be a non-empty array"
-        )
+    candidates = data.get("candidates")
+    agent_metadata = data.get("agent")
 
     seed_value = os.getenv("QUANTUM_SEED")
     seed = int(seed_value) if seed_value is not None else None
 
     try:
-        agent_plan = AgenticPlanner.generate_grover_plan(asteroid, simulations)
+        if not isinstance(candidates, list) or not candidates:
+            asteroid = data.get("asteroid")
+            simulations = data.get("simulations")
+            if not isinstance(asteroid, dict) or not asteroid:
+                return error_response(
+                    "VALIDATION_ERROR",
+                    "asteroid must be a non-empty object"
+                )
+            if not isinstance(simulations, list) or not simulations:
+                return error_response(
+                    "VALIDATION_ERROR",
+                    "simulations must be a non-empty array"
+                )
+
+            # Compatibility path for legacy direct callers. Spring's production
+            # flow obtains this plan from the dedicated Agent Service on port 5001.
+            try:
+                agent_plan = AgenticPlanner.generate_grover_plan(asteroid, simulations)
+            except AgenticPlanner.AgentInputError:
+                raise
+            except AgenticPlanner.AgentPlanningError:
+                if not configured_boolean("AI_AGENT_FALLBACK_ENABLED", True):
+                    raise
+                agent_plan = AgenticPlanner.generate_fallback_plan(asteroid, simulations)
+            candidates = agent_plan["candidates"]
+            agent_metadata = {
+                "model": agent_plan["model"],
+                "mode": agent_plan.get("mode", "external-agent"),
+                "summary": agent_plan["summary"],
+                "candidateAssessments": candidates
+            }
+
         result = QuantumOptimizer.perform_quantum_optimization(
-            agent_plan["candidates"],
+            candidates,
             shots=configured_positive_integer("QUANTUM_SHOTS", 4096),
             seed=seed
         )
-        result["agent"] = {
-            "model": agent_plan["model"],
-            "summary": agent_plan["summary"],
-            "candidateAssessments": agent_plan["candidates"]
-        }
+        if isinstance(agent_metadata, dict):
+            result["agent"] = agent_metadata
     except AgenticPlanner.AgentInputError as exception:
         return error_response("VALIDATION_ERROR", str(exception), 400)
     except AgenticPlanner.AgentPlanningError as exception:

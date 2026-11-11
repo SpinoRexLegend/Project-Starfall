@@ -21,7 +21,8 @@ It handles:
     * `MLController` & `MLAnalysisService`: Serves as the bridge to a separate Python ML service using Spring's `RestTemplate` for JSON payload exchange.
     * `DatabaseController`: Manages interactions natively with the relational database.
 * **Persistence Layer**: **Hibernate ORM** with **MySQL** handles the storage of entities representing the asteroid, multiple simulation runs, risk assessments, and the final quantum optimized choices.
-* **External AI/ML Process**: Relies on a standalone Python HTTP service (runs on port 5000) for running heavy numerical modeling, risk scoring models, and mock quantum probability optimization.
+* **Agent Service**: A standalone Python HTTP service on port 5001 owns external-agent calls, structured validation, and the local safety-agent fallback.
+* **Analysis/Quantum Service**: A separate Python HTTP service on port 5000 owns simulations, physical risk calculations, and Qiskit Grover execution.
 
 ## Key Features
 
@@ -38,7 +39,7 @@ It handles:
 * Node/Live Server (For quick Frontend hosting)
 * The Python analysis service configured through `PYTHON_SERVICE_URL`
 
-Install the Python service dependencies with:
+Install the shared Python service dependencies with:
 
 ```bash
 python -m pip install -r MLSimulator/requirements.txt
@@ -56,8 +57,20 @@ The internal Python API exposes:
 
 * `POST /internal/v1/simulations`
 * `POST /internal/v1/risk-assessments`
-* `POST /internal/v1/optimizations`
+* `POST /internal/v1/optimizations` accepts validated candidates from the Agent Service
 * `GET /internal/v1/health`
+
+The dedicated Agent Service exposes:
+
+* `POST /internal/v1/agent-decisions`
+* `GET /internal/v1/health`
+
+Run the services from the repository root with:
+
+```bash
+python -m AgentService.App
+python MLSimulator/App.py
+```
 
 Legacy Python endpoints (`/predict`, `/assess`, `/quantum`) remain available during migration.
 
@@ -66,13 +79,16 @@ Legacy Python endpoints (`/predict`, `/assess`, `/quantum`) remain available dur
 Configure production deployments with environment variables rather than committed credentials:
 
 * `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `DB_SCHEMA_ACTION`
-* `PYTHON_SERVICE_URL`, `PYTHON_CONNECT_TIMEOUT`, `PYTHON_READ_TIMEOUT`
+* `PYTHON_SERVICE_URL`, `AGENT_SERVICE_URL`, `PYTHON_CONNECT_TIMEOUT`, `PYTHON_READ_TIMEOUT`
 * `QUANTUM_SHOTS` and optional `QUANTUM_SEED` for reproducible local sampling
-* `OPENAI_API_KEY` and `AI_AGENT_MODEL` for the decision agent
+* `OPENAI_API_KEY` and `AI_AGENT_MODEL` for the external decision agent
 * Optional `AI_AGENT_BASE_URL` (an OpenAI Responses-compatible `/v1` base URL), `AI_AGENT_TIMEOUT_SECONDS`, and `AI_AGENT_MAX_OUTPUT_TOKENS`
+* `AI_AGENT_FALLBACK_ENABLED` defaults to `true`, keeping optimization available through the Starfall local safety agent when the external agent is not configured or temporarily unreachable
+* `AI_FALLBACK_DISTANCE_WEIGHT`, `AI_FALLBACK_FUEL_WEIGHT`, and `AI_FALLBACK_TIME_WEIGHT` tune the local data-relative safety policy; supplied values are normalized at runtime
+* Kinetic energy uses `E = ½mv²`, with spherical volume, kilometer-to-meter conversion, and composition-based bulk density. Density assumptions can be overridden with `ASTEROID_DENSITY_METALLIC_KG_M3`, `ASTEROID_DENSITY_CARBONACEOUS_KG_M3`, `ASTEROID_DENSITY_ICY_KG_M3`, `ASTEROID_DENSITY_STONY_KG_M3`, or `ASTEROID_DENSITY_DEFAULT_KG_M3`
 * `APP_CORS_ALLOWED_ORIGINS`, `SERVER_PORT`
-* `HOST`, `PORT`, `FLASK_DEBUG` for the Python service
+* `HOST`, `PORT`, `AGENT_HOST`, `AGENT_PORT`, `FLASK_DEBUG` for the Python services
 
 The browser client uses same-origin `/api/v1/analyses` by default. A separately hosted frontend can inject `window.STARFALL_CONFIG.apiBaseUrl` at deployment time.
 
-The optimization endpoint sends the full asteroid record and every generated simulation to the AI decision agent. Natural-language summaries and rationales are retained for display, while a strict candidate schema is validated before execution. Unknown or duplicate simulation IDs, missing candidates, invalid scores, and attempts to make failed simulations eligible are rejected. Grover then marks the largest eligible agent score and executes amplitude amplification with Qiskit's local `StatevectorSampler`. The number of qubits and Grover iterations are derived from the candidate and marked-state counts.
+Spring sends the full asteroid record and every generated simulation to the dedicated Agent Service. Natural-language summaries and rationales are retained for display, while a strict candidate schema is validated before the candidate plan crosses into the analysis/quantum service. Unknown or duplicate simulation IDs, missing candidates, invalid scores, and attempts to make failed simulations eligible are rejected. Grover then marks the largest eligible agent score and executes amplitude amplification with Qiskit's local `StatevectorSampler`. The number of qubits and Grover iterations are derived from the candidate and marked-state counts.
