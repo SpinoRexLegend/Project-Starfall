@@ -102,27 +102,18 @@ document.addEventListener('DOMContentLoaded', () => {
             : null;
         setText('agent-rationale', stringValue(selectedAssessment?.rationale) || 'The selected state carried the strongest eligible score supplied to the Grover oracle.');
 
-        renderRecommendation(asteroidId, risk, optimal, selectedId);
+        renderRecommendation(optimal, stringValue(agent.recommendation));
         renderChart(quantum.bar_chart, selectedId);
         renderSimulationTable(simulations, selectedId);
     }
 
-    function renderRecommendation(asteroidId, risk, optimal, selectedId) {
-        const impactProbability = numericValue(risk.impactProbability);
-        const energy = numericValue(risk.kineticEnergyMT);
-        const damage = stringValue(risk.estimatedDamage) || 'unclassified';
+    function renderRecommendation(optimal, agentRecommendation) {
         const distance = numericValue(optimal['Distance from which it will pass if force is applied at that angle']);
         const fuel = numericValue(optimal['Fuel Cost']);
         const execution = numericValue(optimal['Execution time for hitting the earth']);
         const angle = numericValue(optimal['Angle at which force to be applied']);
-        const succeeded = simulationSucceeded(optimal);
 
-        const probabilityText = impactProbability === null ? 'an undetermined impact probability' : `a ${(impactProbability * 100).toFixed(1)}% impact probability`;
-        const energyText = energy === null ? `${damage.toLowerCase()} projected damage` : `${formatEnergyMt(energy)} MT of estimated kinetic energy and ${damage.toLowerCase()} projected damage`;
-        const strategyText = selectedId ? `Simulation ${compactId(selectedId, 13)} was amplified as the strongest eligible intervention.` : 'The highest eligible intervention was selected.';
-        const outcomeText = succeeded ? 'The archived simulation indicates a successful deflection.' : 'The selected simulation requires further review before execution.';
-
-        setText('output-text', `${asteroidId} presents ${probabilityText}, with ${energyText}. ${strategyText} ${outcomeText}`);
+        setText('output-text', agentRecommendation || 'The decision agent did not provide a final recommendation.');
         setText('strategy-angle', angle === null ? '—' : `${formatNumber(angle, 2)}°`);
         setText('strategy-distance', distance === null ? '—' : `${formatNumber(distance, 2)} km`);
         setText('strategy-fuel', fuel === null ? '—' : formatNumber(fuel, 2));
@@ -216,10 +207,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function setText(id, value) { const element = document.getElementById(id); if (element) element.textContent = String(value); }
 
     function initDeferredVideos() {
-        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         const saveData = Boolean(navigator.connection?.saveData);
-        const canAnimateHero = window.matchMedia('(min-width: 900px)').matches && !reduceMotion && !saveData;
-        const canAnimateProtocol = window.matchMedia('(min-width: 761px)').matches && !reduceMotion && !saveData;
+        const canAnimateHero = window.matchMedia('(min-width: 900px)').matches && !saveData;
+        const canAnimateProtocol = !saveData;
         const heroVideo = document.querySelector('[data-deferred-video="hero"]');
         const viewportVideos = [...document.querySelectorAll('[data-deferred-video="viewport"]')];
 
@@ -227,6 +217,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!video || video.dataset.hydrated === 'true') return;
             const source = video.querySelector('source[data-src]');
             if (!source) return;
+            video.muted = true;
+            video.defaultMuted = true;
+            video.loop = true;
             source.src = source.dataset.src;
             source.removeAttribute('data-src');
             video.dataset.hydrated = 'true';

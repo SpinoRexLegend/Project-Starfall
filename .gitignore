@@ -41,9 +41,14 @@ build/
 __pycache__/
 *.py[cod]
 .env
+.venv/
+
+### Project-local tooling ###
+.tools/
 
 ### Local database rollback dumps ###
 database-backups/
 
 ### Local runtime logs ###
 runtime-logs/
+runtime/

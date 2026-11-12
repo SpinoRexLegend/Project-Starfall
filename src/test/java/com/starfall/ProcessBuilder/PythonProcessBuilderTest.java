@@ -52,6 +52,7 @@ class PythonProcessBuilderTest {
         plan.put("model", "starfall-local-safety-agent");
         plan.put("mode", "fallback");
         plan.put("summary", "Validated separately.");
+        plan.put("recommendation", "Proceed with SIM-1.");
         plan.put("candidates", candidates);
 
         HashMap<String, Object> request = new PythonProcessBuilder()
@@ -60,6 +61,7 @@ class PythonProcessBuilderTest {
         assertEquals(candidates, request.get("candidates"));
         Map<?, ?> agent = (Map<?, ?>) request.get("agent");
         assertEquals("starfall-local-safety-agent", agent.get("model"));
+        assertEquals("Proceed with SIM-1.", agent.get("recommendation"));
         assertEquals(candidates, agent.get("candidateAssessments"));
     }
 }

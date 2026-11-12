@@ -33,6 +33,7 @@ class AgenticPlannerTest(unittest.TestCase):
     def test_sends_all_details_and_returns_validated_plan(self):
         response = self._provider_response({
             "summary": "SIM-A is the only successful option.",
+            "recommendation": "Proceed with SIM-A because it is the only successful option.",
             "candidates": [
                 {"simulationId": "SIM-A", "score": 82, "eligible": True, "rationale": "Successful"},
                 {"simulationId": "SIM-B", "score": 30, "eligible": False, "rationale": "Failed"}
@@ -56,6 +57,10 @@ class AgenticPlannerTest(unittest.TestCase):
         self.assertTrue(payload["text"]["format"]["strict"])
         self.assertEqual("test-model", plan["model"])
         self.assertEqual("external-agent", plan["mode"])
+        self.assertEqual(
+            "Proceed with SIM-A because it is the only successful option.",
+            plan["recommendation"]
+        )
         self.assertEqual(82.0, plan["candidates"][0]["score"])
 
     def test_fallback_plan_scores_request_data_and_excludes_failed_runs(self):
@@ -82,6 +87,7 @@ class AgenticPlannerTest(unittest.TestCase):
     def test_rejects_hallucinated_simulation_id(self):
         response = self._provider_response({
             "summary": "Invalid plan",
+            "recommendation": "Proceed with MADE-UP.",
             "candidates": [
                 {"simulationId": "MADE-UP", "score": 99, "eligible": True, "rationale": "Invented"},
                 {"simulationId": "SIM-B", "score": 1, "eligible": False, "rationale": "Failed"}
@@ -95,6 +101,7 @@ class AgenticPlannerTest(unittest.TestCase):
     def test_rejects_failed_simulation_marked_eligible(self):
         response = self._provider_response({
             "summary": "Invalid plan",
+            "recommendation": "Proceed with SIM-B.",
             "candidates": [
                 {"simulationId": "SIM-A", "score": 50, "eligible": True, "rationale": "Successful"},
                 {"simulationId": "SIM-B", "score": 90, "eligible": True, "rationale": "Unsafe"}
@@ -108,6 +115,19 @@ class AgenticPlannerTest(unittest.TestCase):
     def test_requires_runtime_credentials_and_model(self):
         with patch.dict("os.environ", {}, clear=True):
             with self.assertRaisesRegex(AgentPlanningError, "OPENAI_API_KEY"):
+                AgenticPlanner.generate_grover_plan(self.asteroid, self.simulations)
+
+    def test_rejects_plan_without_final_recommendation(self):
+        response = self._provider_response({
+            "summary": "SIM-A is the only successful option.",
+            "candidates": [
+                {"simulationId": "SIM-A", "score": 82, "eligible": True, "rationale": "Successful"},
+                {"simulationId": "SIM-B", "score": 0, "eligible": False, "rationale": "Failed"}
+            ]
+        })
+
+        with self._configured_provider(response):
+            with self.assertRaisesRegex(AgentPlanningError, "final recommendation"):
                 AgenticPlanner.generate_grover_plan(self.asteroid, self.simulations)
 
     def _configured_provider(self, response):

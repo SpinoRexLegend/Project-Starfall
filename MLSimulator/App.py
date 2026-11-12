@@ -198,6 +198,7 @@ def quantum():
                 "model": agent_plan["model"],
                 "mode": agent_plan.get("mode", "external-agent"),
                 "summary": agent_plan["summary"],
+                "recommendation": agent_plan["recommendation"],
                 "candidateAssessments": candidates
             }
 

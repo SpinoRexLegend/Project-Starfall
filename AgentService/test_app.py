@@ -34,6 +34,7 @@ class AgentServiceApiTest(unittest.TestCase):
             "model": "starfall-local-safety-agent",
             "mode": "fallback",
             "summary": "Validated locally.",
+            "recommendation": "Proceed with SIM-A.",
             "candidates": [{
                 "simulationId": "SIM-A",
                 "score": 50.0,

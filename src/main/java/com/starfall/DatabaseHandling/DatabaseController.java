@@ -6,6 +6,7 @@ import org.hibernate.SessionFactory;
 import org.hibernate.Transaction;
 import org.hibernate.cfg.Configuration;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
 import java.util.HashMap;
@@ -21,6 +22,7 @@ public class DatabaseController {
 
     private final SessionFactory sf;
 
+    @Autowired
     public DatabaseController(
             @Value("${database.url}") String databaseUrl,
             @Value("${database.username}") String databaseUsername,
@@ -54,6 +56,10 @@ public class DatabaseController {
         configuration.setProperty("hibernate.hikari.maxLifetime", Long.toString(maxLifetime));
 
         this.sf = configuration.buildSessionFactory();
+    }
+
+    DatabaseController(SessionFactory sessionFactory) {
+        this.sf = sessionFactory;
     }
 
     public Asteroid getAsteroid(String a_ID) {

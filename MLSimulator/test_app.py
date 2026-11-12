@@ -67,6 +67,7 @@ class StarfallApiTest(unittest.TestCase):
         generate_plan.return_value = {
             "model": "test-model",
             "summary": "SIM-B is the safest feasible strategy.",
+            "recommendation": "Proceed with SIM-B for the strongest safety margin.",
             "candidates": [
                 {"simulationId": "SIM-A", "score": 10.0, "eligible": True, "rationale": "Lower margin"},
                 {"simulationId": "SIM-B", "score": 50.0, "eligible": True, "rationale": "Best margin"},
@@ -101,6 +102,7 @@ class StarfallApiTest(unittest.TestCase):
             "model": "starfall-local-safety-agent",
             "mode": "fallback",
             "summary": "Validated separately.",
+            "recommendation": "Proceed with SIM-B.",
             "candidateAssessments": candidates
         }
 
@@ -130,6 +132,7 @@ class StarfallApiTest(unittest.TestCase):
             "model": "starfall-local-safety-agent",
             "mode": "fallback",
             "summary": "Local safety policy used.",
+            "recommendation": "Proceed with SIM-A.",
             "candidates": [{
                 "simulationId": "SIM-A",
                 "score": 50.0,

@@ -101,6 +101,10 @@ function Resolve-MavenExecutable {
         }
     }
 
+    Get-ChildItem -Path (Join-Path $ProjectRoot '.tools\apache-maven-*\bin\mvn.cmd') -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending |
+        ForEach-Object { $candidates.Add($_.FullName) }
+
     foreach ($candidate in $candidates | Select-Object -Unique) {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) {
             return (Resolve-Path -LiteralPath $candidate).Path
@@ -110,16 +114,66 @@ function Resolve-MavenExecutable {
     throw 'Apache Maven was not found. Install Maven or set STARFALL_MAVEN to mvn.cmd.'
 }
 
+function Resolve-JavaExecutable {
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    foreach ($candidate in @(
+        $env:STARFALL_JAVA,
+        $(if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) { Join-Path $env:JAVA_HOME 'bin\java.exe' })
+    )) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            $candidates.Add($candidate)
+        }
+    }
+
+    Get-ChildItem -Path (Join-Path $ProjectRoot '.tools\jdk-*\bin\java.exe') -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending |
+        ForEach-Object { $candidates.Add($_.FullName) }
+
+    $pathCommand = Get-Command java.exe -ErrorAction SilentlyContinue
+    if ($null -ne $pathCommand) {
+        $candidates.Add($pathCommand.Source)
+    }
+
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    throw 'Java was not found. Install JDK 23 or set STARFALL_JAVA to java.exe.'
+}
+
 function Assert-PythonPackages {
     param([string]$Python)
-    $null = & $Python -c "import flask, qiskit" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Python dependencies are incomplete. Run: `"$Python`" -m pip install -r `"$ProjectRoot\MLSimulator\requirements.txt`""
+    $probeOutput = @()
+    $probeExitCode = 1
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        # Native stderr must be captured as diagnostic text instead of becoming
+        # a terminating PowerShell error that hides the real Python exception.
+        $ErrorActionPreference = 'Continue'
+        $probeOutput = @(& $Python -c "import flask, qiskit" 2>&1)
+        $probeExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($probeExitCode -ne 0) {
+        $details = ($probeOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+        if ([string]::IsNullOrWhiteSpace($details)) {
+            $details = 'Python returned no diagnostic output.'
+        }
+        $installCommand = "`"$Python`" -m pip install -r `"$ProjectRoot\MLSimulator\requirements.txt`""
+        throw "Python dependencies are incomplete.`n$details`nRepair command:`n  $installCommand"
     }
 }
 
 function Get-MySqlService {
-    $service = Get-Service -Name 'MYSQL80' -ErrorAction SilentlyContinue
+    $service = $null
+    if (-not [string]::IsNullOrWhiteSpace($env:STARFALL_MYSQL_SERVICE)) {
+        $service = Get-Service -Name $env:STARFALL_MYSQL_SERVICE -ErrorAction SilentlyContinue
+    }
     if ($null -eq $service) {
         $service = Get-Service -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match '^(mysql|maria)' -or $_.DisplayName -match 'MySQL|MariaDB' } |
@@ -223,10 +277,26 @@ function Start-StarfallComponent {
 
         $process.Refresh()
         if ($process.HasExited) {
-            $details = if (Test-Path -LiteralPath $stderrLog) {
-                (Get-Content -LiteralPath $stderrLog -Tail 15 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
-            } else { 'No error log was produced.' }
-            throw "$Name exited with code $($process.ExitCode).`n$details`nLog: $stderrLog"
+            $process.WaitForExit()
+            $process.Refresh()
+            $stderrLines = if (Test-Path -LiteralPath $stderrLog) { @(Get-Content -LiteralPath $stderrLog -Tail 120 -ErrorAction SilentlyContinue) } else { @() }
+            $stdoutLines = if (Test-Path -LiteralPath $stdoutLog) { @(Get-Content -LiteralPath $stdoutLog -Tail 160 -ErrorAction SilentlyContinue) } else { @() }
+            $allLines = @($stderrLines) + @($stdoutLines)
+            $credentialFailure = $allLines | Where-Object { $_ -match 'Access denied for user' } | Select-Object -Last 1
+            if ($null -ne $credentialFailure) {
+                $details = "Database authentication failed: $credentialFailure"
+            }
+            elseif ($stderrLines.Count -gt 0) {
+                $details = ($stderrLines | Select-Object -Last 15) -join [Environment]::NewLine
+            }
+            elseif ($stdoutLines.Count -gt 0) {
+                $details = ($stdoutLines | Select-Object -Last 15) -join [Environment]::NewLine
+            }
+            else {
+                $details = 'No process output was produced.'
+            }
+            $exitCode = if ($null -eq $process.ExitCode -or [string]::IsNullOrWhiteSpace([string]$process.ExitCode)) { 'unavailable' } else { [string]$process.ExitCode }
+            throw "$Name exited with code $exitCode.`n$details`nLogs: $stdoutLog and $stderrLog"
         }
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $deadline)
@@ -274,15 +344,15 @@ try {
     $python = Resolve-PythonExecutable
     Assert-PythonPackages -Python $python
     $maven = Resolve-MavenExecutable
-    $java = Get-Command java.exe -ErrorAction SilentlyContinue
-    if ($null -eq $java) {
-        throw 'Java was not found on PATH. Install the JDK required by pom.xml.'
-    }
+    $java = Resolve-JavaExecutable
+    $javaBin = Split-Path -Parent $java
+    $env:JAVA_HOME = Split-Path -Parent $javaBin
+    $env:Path = "$javaBin;$env:Path"
     $mysqlService = Get-MySqlService
 
     Write-Host "Python : $python"
     Write-Host "Maven  : $maven"
-    Write-Host "Java   : $($java.Source)"
+    Write-Host "Java   : $java"
     Write-Host "MySQL  : $($mysqlService.Name) [$($mysqlService.Status)]"
 
     if ($ValidateOnly) {
@@ -295,14 +365,19 @@ try {
     Set-DefaultEnvironment -Name 'DB_URL' -Value 'jdbc:mysql://127.0.0.1:3306/aegis'
     Set-DefaultEnvironment -Name 'DB_USERNAME' -Value 'root'
     Set-DefaultEnvironment -Name 'DB_SCHEMA_ACTION' -Value 'validate'
-    Set-DefaultEnvironment -Name 'PYTHON_SERVICE_URL' -Value 'http://127.0.0.1:5000'
-    Set-DefaultEnvironment -Name 'AGENT_SERVICE_URL' -Value 'http://127.0.0.1:5001'
-    Set-DefaultEnvironment -Name 'APP_CORS_ALLOWED_ORIGINS' -Value 'http://127.0.0.1:5500,http://localhost:5500'
     Set-DefaultEnvironment -Name 'HOST' -Value '127.0.0.1'
     Set-DefaultEnvironment -Name 'PORT' -Value '5000'
     Set-DefaultEnvironment -Name 'AGENT_HOST' -Value '127.0.0.1'
     Set-DefaultEnvironment -Name 'AGENT_PORT' -Value '5001'
     Set-DefaultEnvironment -Name 'SERVER_PORT' -Value '8080'
+    Set-DefaultEnvironment -Name 'STARFALL_FRONTEND_PORT' -Value '5500'
+    $analysisPort = [int]$env:PORT
+    $agentPort = [int]$env:AGENT_PORT
+    $backendPort = [int]$env:SERVER_PORT
+    $frontendPort = [int]$env:STARFALL_FRONTEND_PORT
+    Set-DefaultEnvironment -Name 'PYTHON_SERVICE_URL' -Value "http://127.0.0.1:$analysisPort"
+    Set-DefaultEnvironment -Name 'AGENT_SERVICE_URL' -Value "http://127.0.0.1:$agentPort"
+    Set-DefaultEnvironment -Name 'APP_CORS_ALLOWED_ORIGINS' -Value "http://127.0.0.1:$frontendPort,http://localhost:$frontendPort"
     Set-DefaultEnvironment -Name 'FLASK_DEBUG' -Value 'false'
     Set-DefaultEnvironment -Name 'AI_AGENT_FALLBACK_ENABLED' -Value 'true'
     Set-DefaultEnvironment -Name 'PYTHONUNBUFFERED' -Value '1'
@@ -311,25 +386,26 @@ try {
     Write-Stage 'Starting database'
     Start-MySqlIfNeeded
 
+    Write-Stage 'Starting Spring Boot API and validating database access'
+    $mavenRepository = Join-Path $ProjectRoot '.tools\m2-repository'
+    Start-StarfallComponent -Name 'Spring Boot API' -Executable $maven `
+        -Arguments @('-q', "-Dmaven.repo.local=$mavenRepository", 'org.springframework.boot:spring-boot-maven-plugin:3.2.4:run') -WorkingDirectory $ProjectRoot `
+        -HealthUri "http://127.0.0.1:$backendPort/api/v1/health" -Port $backendPort
+
     Write-Stage 'Starting AI decision agent'
     Start-StarfallComponent -Name 'Agent service' -Executable $python `
         -Arguments @('-m', 'AgentService.App') -WorkingDirectory $ProjectRoot `
-        -HealthUri 'http://127.0.0.1:5001/internal/v1/health' -Port 5001
+        -HealthUri "http://127.0.0.1:$agentPort/internal/v1/health" -Port $agentPort
 
     Write-Stage 'Starting simulation and quantum service'
     Start-StarfallComponent -Name 'Analysis and quantum service' -Executable $python `
         -Arguments @('MLSimulator/App.py') -WorkingDirectory $ProjectRoot `
-        -HealthUri 'http://127.0.0.1:5000/internal/v1/health' -Port 5000
-
-    Write-Stage 'Starting Spring Boot API'
-    Start-StarfallComponent -Name 'Spring Boot API' -Executable $maven `
-        -Arguments @('-q', 'org.springframework.boot:spring-boot-maven-plugin:3.2.4:run') -WorkingDirectory $ProjectRoot `
-        -HealthUri 'http://127.0.0.1:8080/api/v1/health' -Port 8080
+        -HealthUri "http://127.0.0.1:$analysisPort/internal/v1/health" -Port $analysisPort
 
     Write-Stage 'Starting frontend'
     Start-StarfallComponent -Name 'Frontend' -Executable $python `
-        -Arguments @('-m', 'http.server', '5500', '--bind', '127.0.0.1', '--directory', 'Frontend') -WorkingDirectory $ProjectRoot `
-        -HealthUri 'http://127.0.0.1:5500/' -Port 5500
+        -Arguments @('-m', 'http.server', "$frontendPort", '--bind', '127.0.0.1', '--directory', 'Frontend') -WorkingDirectory $ProjectRoot `
+        -HealthUri "http://127.0.0.1:$frontendPort/" -Port $frontendPort
 
     $StartedProcesses |
         ForEach-Object { [pscustomobject]@{ PID = $_.Id; StartedAt = (Get-Date).ToString('o') } } |
@@ -338,8 +414,14 @@ try {
     Write-Stage 'Starfall is ready'
     $ComponentResults | Format-Table -AutoSize
     Write-Host "Logs: $LogRoot"
-    Write-Host 'Opening http://127.0.0.1:5500/'
-    Start-Process 'http://127.0.0.1:5500/'
+    $frontendUrl = "http://127.0.0.1:$frontendPort/"
+    Write-Host "Opening $frontendUrl"
+    try {
+        Start-Process $frontendUrl
+    }
+    catch {
+        Write-Host 'The services are ready, but the browser could not be opened automatically.' -ForegroundColor Yellow
+    }
 }
 catch {
     Stop-StartedProcesses

@@ -62,6 +62,7 @@ public class PythonProcessBuilder {
         agentMetadata.put("model", agentPlan.get("model"));
         agentMetadata.put("mode", agentPlan.get("mode"));
         agentMetadata.put("summary", agentPlan.get("summary"));
+        agentMetadata.put("recommendation", agentPlan.get("recommendation"));
         agentMetadata.put("candidateAssessments", candidates);
 
         HashMap<String, Object> map = new HashMap<>();
